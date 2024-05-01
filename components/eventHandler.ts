@@ -33,10 +33,10 @@ import {
 } from "./types/types"
 import { contractTypes, gameDifficulty, ServerVer } from "./utils"
 import { json as jsonMiddleware } from "body-parser"
-import { log, LogLevel } from "./loggingInterop"
+import { log, logDebug, LogLevel } from "./loggingInterop"
 import { getUserData, writeUserData } from "./databaseHandler"
 import { controller } from "./controller"
-import { swapToLocationStatus } from "./discordRp"
+import { swapToLocationStatus } from "./discord/discordRp"
 import { randomUUID } from "crypto"
 import { liveSplitManager } from "./livesplit/liveSplitManager"
 import { handleMultiplayerEvent } from "./multiplayer/multiplayerService"
@@ -86,7 +86,6 @@ const pushMessageQueue = new Map<string, PushMessage[]>()
  * @param userId The push message's target user.
  * @param message The raw push message to send.
  * @see enqueueEvent
- * @author grappigegovert
  */
 export function enqueuePushMessage(userId: string, message: unknown): void {
     let userQueue
@@ -113,7 +112,6 @@ export function enqueuePushMessage(userId: string, message: unknown): void {
  *
  * @param session The contract session.
  * @param objective The objective object.
- * @author Reece Dunham
  */
 export function registerObjectiveListener(
     session: ContractSession,
@@ -225,7 +223,6 @@ export function setupScoring(
  * @param userId The event's target user.
  * @param event The event to send.
  * @see enqueuePushMessage
- * @author grappigegovert
  */
 export function enqueueEvent(userId: string, event: ServerToClientEvent): void {
     let userQueue: S2CEventWithTimestamp[] | undefined
@@ -352,7 +349,9 @@ export function newSession(
         failedObjectives: new Set(),
         recording: PeacockCameraStatus.NotSpotted,
         lastAccident: 0,
-        lastKill: {},
+        lastKill: {
+            legacyIsUnnoticed: true,
+        },
         kills: new Set(),
         compat: doScoring,
         markedTargets: new Set(),
@@ -520,7 +519,6 @@ eventRouter.post(
  *
  * @param uId The user's ID.
  * @returns The ID for the user's active session.
- * @author Reece Dunham
  */
 export function getActiveSessionIdForUser(uId: string): string | undefined {
     return userIdToTempSession.get(uId)
@@ -531,7 +529,6 @@ export function getActiveSessionIdForUser(uId: string): string | undefined {
  *
  * @param uId The user's ID.
  * @returns The user's active contract session.
- * @author Reece Dunham
  */
 export function getSession(uId: string): ContractSession | undefined {
     const currentSession = getActiveSessionIdForUser(uId)
@@ -643,7 +640,8 @@ function saveEvents(
     const response: string[] = []
     const processed: string[] = []
     const userData = getUserData(userId, gameVersion)
-    events.forEach((event) => {
+
+    for (const event of events) {
         let session = contractSessions.get(event.ContractSessionId)
 
         if (!session) {
@@ -669,13 +667,11 @@ function saveEvents(
             session.contractId !== event.ContractId ||
             session.userId !== userId
         ) {
-            if (PEACOCK_DEV) {
-                log(LogLevel.DEBUG, "No session or session user ID mismatch!")
-                console.debug(session)
-                console.debug(event)
-            }
+            log(LogLevel.DEBUG, "No session or session user ID mismatch!")
+            logDebug(session)
+            logDebug(event)
 
-            return // session does not exist or contractid/userid doesn't match
+            continue // session does not exist or contractid/userid doesn't match
         }
 
         session.duration = event.Timestamp
@@ -717,7 +713,7 @@ function saveEvents(
                 )
 
                 if (val.state === "Failure") {
-                    if (PEACOCK_DEV && contractType !== "evergreen") {
+                    if (contractType !== "evergreen") {
                         log(LogLevel.DEBUG, `Objective failed: ${objectiveId}`)
                     }
 
@@ -772,7 +768,7 @@ function saveEvents(
             processed.push(event.Name)
             response.push(process.hrtime.bigint().toString())
 
-            return
+            continue
         }
 
         // these events are important but may be fired after the timer is over
@@ -790,14 +786,14 @@ function saveEvents(
         ) {
             // Do not handle events that occur after exiting the level
             response.push(process.hrtime.bigint().toString())
-            return
+            continue
         }
 
         if (handleMultiplayerEvent(event, session)) {
             processed.push(event.Name)
             response.push(process.hrtime.bigint().toString())
 
-            return
+            continue
         }
 
         switch (event.Name) {
@@ -808,6 +804,8 @@ function saveEvents(
                 )
                 break
             case "Kill": {
+                let couldCauseNoticedKill = true
+
                 const killValue = (event as KillC2SEvent).Value
 
                 if (session.firstKillTimestamp === undefined) {
@@ -821,6 +819,12 @@ function saveEvents(
                         timestamp: event.Timestamp,
                         repositoryIds: [killValue.RepositoryId],
                     }
+
+                    if (gameVersion === "h1" && killValue.Accident) {
+                        // this was an accident, can't be a noticed kill
+                        session.lastKill.legacyIsUnnoticed = true
+                        couldCauseNoticedKill = false
+                    }
                 }
 
                 if (killValue.KillContext === EDeathContext.eDC_NOT_HERO) {
@@ -830,13 +834,19 @@ function saveEvents(
                         `${killValue.RepositoryId} eliminated, 47 not responsible`,
                     )
                     response.push(process.hrtime.bigint().toString())
-                    return
+                    session.lastKill.legacyIsUnnoticed = true
+                    couldCauseNoticedKill = false
+                    continue
                 }
 
                 log(
                     LogLevel.DEBUG,
                     `Actor ${killValue.RepositoryId} eliminated.`,
                 )
+
+                if (couldCauseNoticedKill) {
+                    session.lastKill.legacyIsUnnoticed = false
+                }
 
                 if (killValue.IsTarget || contractType === "creation") {
                     const kill: RatingKill = {
@@ -859,6 +869,9 @@ function saveEvents(
 
                 break
             }
+            case "Unnoticed_Kill":
+                session.lastKill.legacyIsUnnoticed = true
+                break
             case "CrowdNPC_Died":
                 session.crowdNpcKills += 1
                 break
@@ -1120,9 +1133,9 @@ function saveEvents(
         processed.push(event.Name)
 
         response.push(process.hrtime.bigint().toString())
-    })
+    }
 
-    if (PEACOCK_DEV && processed.length > 0) {
+    if (processed.length > 0) {
         log(
             LogLevel.DEBUG,
             `Event summary: ${picocolors.gray(processed.join(", "))}`,

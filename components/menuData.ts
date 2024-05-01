@@ -95,28 +95,46 @@ import { getPlayerProfileData } from "./menus/playerProfile"
 
 const menuDataRouter = Router()
 
+// We make this lookup table to quickly get it, there's no other quick way for it.
+export const SNIPER_UNLOCK_TO_LOCATION: Record<string, string> = {
+    FIREARMS_SC_HERO_SNIPER_HM: "LOCATION_PARENT_AUSTRIA",
+    FIREARMS_SC_HERO_SNIPER_KNIGHT: "LOCATION_PARENT_AUSTRIA",
+    FIREARMS_SC_HERO_SNIPER_STONE: "LOCATION_PARENT_AUSTRIA",
+    FIREARMS_SC_SEAGULL_HM: "LOCATION_PARENT_SALTY",
+    FIREARMS_SC_SEAGULL_KNIGHT: "LOCATION_PARENT_SALTY",
+    FIREARMS_SC_SEAGULL_STONE: "LOCATION_PARENT_SALTY",
+    FIREARMS_SC_FALCON_HM: "LOCATION_PARENT_CAGED",
+    FIREARMS_SC_FALCON_KNIGHT: "LOCATION_PARENT_CAGED",
+    FIREARMS_SC_FALCON_STONE: "LOCATION_PARENT_CAGED",
+}
+
 // /profiles/page/
 
 menuDataRouter.get(
     "/ChallengeLocation",
     // @ts-expect-error Jwt props.
     (req: RequestWithJwt<ChallengeLocationQuery>, res) => {
+        const pack = controller.challengeService.challengePacks.get(
+            req.query.locationId,
+        )
+
         const location = getVersionedConfig<PeacockLocationsData>(
             "LocationsData",
             req.gameVersion,
             true,
         ).children[req.query.locationId]
 
-        if (!location) {
+        if (!pack && !location) {
             res.status(400).send("Invalid locationId")
             return
         }
 
         const data = {
-            Name: location.DisplayNameLocKey,
+            Name: pack ? pack.Name : location.DisplayNameLocKey,
             Location: location,
-            Children: controller.challengeService.getChallengeDataForLocation(
-                req.query.locationId,
+            Children: controller.challengeService.getChallengeDataForCategory(
+                pack ? req.query.locationId : null,
+                pack ? undefined : location,
                 req.gameVersion,
                 req.jwt.unique_name,
             ),
@@ -1395,25 +1413,12 @@ menuDataRouter.get(
     "/GetMasteryCompletionDataForUnlockable",
     // @ts-expect-error Has jwt props.
     (req: RequestWithJwt<GetMasteryCompletionDataForUnlockableQuery>, res) => {
-        // We make this lookup table to quickly get it, there's no other quick way for it.
-        const unlockToLoc: Record<string, string> = {
-            FIREARMS_SC_HERO_SNIPER_HM: "LOCATION_PARENT_AUSTRIA",
-            FIREARMS_SC_HERO_SNIPER_KNIGHT: "LOCATION_PARENT_AUSTRIA",
-            FIREARMS_SC_HERO_SNIPER_STONE: "LOCATION_PARENT_AUSTRIA",
-            FIREARMS_SC_SEAGULL_HM: "LOCATION_PARENT_SALTY",
-            FIREARMS_SC_SEAGULL_KNIGHT: "LOCATION_PARENT_SALTY",
-            FIREARMS_SC_SEAGULL_STONE: "LOCATION_PARENT_SALTY",
-            FIREARMS_SC_FALCON_HM: "LOCATION_PARENT_CAGED",
-            FIREARMS_SC_FALCON_KNIGHT: "LOCATION_PARENT_CAGED",
-            FIREARMS_SC_FALCON_STONE: "LOCATION_PARENT_CAGED",
-        }
-
         res.json({
             template: null,
             data: {
                 CompletionData: controller.masteryService.getLocationCompletion(
-                    unlockToLoc[req.query.unlockableId],
-                    unlockToLoc[req.query.unlockableId],
+                    SNIPER_UNLOCK_TO_LOCATION[req.query.unlockableId],
+                    SNIPER_UNLOCK_TO_LOCATION[req.query.unlockableId],
                     req.gameVersion,
                     req.jwt.unique_name,
                     "sniper",

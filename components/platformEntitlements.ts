@@ -81,6 +81,8 @@ export const H3_EPIC_ENTITLEMENTS = [
     "a1e9a63fa4f3425aa66b9b8fa3c9cc35",
     // THESARAJEVOSIX:
     "28455871cd0d4ffab52f557cc012ea5e",
+    // SAMBUCA:
+    "9220c020262f420da06eb46a4b1ce86f",
 ]
 
 export const H2_STEAM_ENTITLEMENTS = [
@@ -138,9 +140,7 @@ export function getPlatformEntitlements(
     req: RequestWithJwt,
     res: Response,
 ): void {
-    if (PEACOCK_DEV) {
-        log(LogLevel.DEBUG, `Platform issuer: ${req.body.issuerId}`)
-    }
+    log(LogLevel.DEBUG, `Platform issuer: ${req.body.issuerId}`)
 
     const exts = getUserData(req.jwt.unique_name, req.gameVersion).Extensions
         .entP

@@ -187,29 +187,25 @@ export class ProgressionService {
             if (masteryData) {
                 const previousLevel = locationData.Level
 
-                let newLocationXp = xpRequiredForLevel(maxLevel)
-
-                if (isEvergreenContract) {
-                    newLocationXp = xpRequiredForEvergreenLevel(maxLevel)
-                } else if (sniperUnlockable) {
-                    newLocationXp = xpRequiredForSniperLevel(maxLevel)
-                }
-
                 locationData.Xp = clampValue(
                     locationData.Xp + masteryXp + actionXp,
                     0,
-                    newLocationXp,
+                    isEvergreenContract
+                        ? xpRequiredForEvergreenLevel(maxLevel)
+                        : sniperUnlockable
+                          ? xpRequiredForSniperLevel(maxLevel)
+                          : xpRequiredForLevel(maxLevel),
                 )
 
-                let newLocationLevel = levelForXp(newLocationXp)
-
-                if (isEvergreenContract) {
-                    newLocationLevel = evergreenLevelForXp(newLocationXp)
-                } else if (sniperUnlockable) {
-                    newLocationLevel = sniperLevelForXp(newLocationXp)
-                }
-
-                locationData.Level = clampValue(newLocationLevel, 1, maxLevel)
+                locationData.Level = clampValue(
+                    isEvergreenContract
+                        ? evergreenLevelForXp(locationData.Xp)
+                        : sniperUnlockable
+                          ? sniperLevelForXp(locationData.Xp)
+                          : levelForXp(locationData.Xp),
+                    1,
+                    maxLevel,
+                )
 
                 // If mastery level has gone up, check if there are available drop rewards and award them
                 if (locationData.Level > previousLevel) {
@@ -244,22 +240,14 @@ export class ProgressionService {
         // Update the SubLocation data
         const profileData = userProfile.Extensions.progression.PlayerProfileXP
 
-        let foundSubLocation = profileData.Sublocations.find(
-            (e) => e.Location === parentLocationId,
-        )
-
-        if (!foundSubLocation) {
-            foundSubLocation = {
-                Location: parentLocationId,
-                Xp: 0,
-                ActionXp: 0,
-            }
-
-            profileData.Sublocations.push(foundSubLocation)
+        profileData.Sublocations[contract.Metadata.Location] ??= {
+            Xp: 0,
+            ActionXp: 0,
         }
 
-        foundSubLocation.Xp += masteryXp
-        foundSubLocation.ActionXp += actionXp
+        profileData.Sublocations[contract.Metadata.Location].Xp += masteryXp
+        profileData.Sublocations[contract.Metadata.Location].ActionXp +=
+            actionXp
 
         return true
     }

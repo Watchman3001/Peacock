@@ -17,7 +17,7 @@
  */
 
 import { existsSync } from "fs"
-import { join, basename, sep } from "path"
+import { basename, join, sep } from "path"
 import millis from "ms"
 import { mkdir, readdir, readFile, unlink, writeFile } from "fs/promises"
 import { createHash } from "crypto"
@@ -60,26 +60,30 @@ export async function generateRequireTable() {
             "generatedPeacockRequireTable.ts",
             "types/globals.d.ts",
             "types/*.ts",
+            "cli.ts",
         ],
     })
 
     const imports = []
     const requiresTable = []
 
-    files.forEach((e) => {
+    for (const e of files) {
         const variable = basename(e, ".ts")
         const importPath = e.replaceAll(sep, "/").replace(/\.ts$/, "")
 
         imports.push(`import * as ${variable} from "./${importPath}"`)
-        requiresTable.push(
-            `"@peacockproject/core/${importPath}": { __esModule: true, ...${variable}}`,
-        )
-    })
+        requiresTable.push(`"@peacockproject/core/${importPath}": ${variable}`)
+    }
 
-    const prettierConfig = await prettier.resolveConfig()
-    prettierConfig.parser = "babel"
+    const prettierConfig = {
+        parser: "babel",
+        semi: false,
+        tabWidth: 4,
+        trailingComma: "all",
+    }
 
-    const generatedPeacockRequireTableFile = prettier.format(
+    // language=TypeScript
+    const generatedPeacockRequireTableFile = await prettier.format(
         `/*
 *     The Peacock Project - a HITMAN server replacement.
 *     Copyright (C) 2021-2024 The Peacock Project Team
@@ -98,11 +102,11 @@ export async function generateRequireTable() {
 *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-${imports.join("\n")}
+        ${imports.join("\n")}
 
-export default {
-    ${requiresTable.join(",\n")}
-}`,
+        export default {
+            ${requiresTable.join(",\n")}
+        }`,
         prettierConfig,
     )
 
@@ -121,7 +125,7 @@ export async function packResources() {
 
     const start = Date.now()
 
-    const contracts = glob.sync("contractdata/**/*.json")
+    const contracts = await glob("contractdata/**/*.json")
     const b = []
     const el = []
 

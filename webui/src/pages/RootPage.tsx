@@ -16,16 +16,18 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable */
+import * as React from "react"
+import { Navbar } from "../components/Navbar"
+import { Outlet } from "react-router-dom"
 
-/**
- * This file tricks WebStorm >= 2017.2 (and IntelliJ IDEA Ultimate) into doing
- * code completion properly for the plugin aliases.
- * This is a hacky workaround, but deal with it.
- */
+export function RootPage() {
+    return (
+        <>
+            <header>
+                <Navbar />
+            </header>
 
-System.config({
-    paths: {
-        "@peacockproject/core/*": "./components/*",
-    },
-})
+            <Outlet />
+        </>
+    )
+}

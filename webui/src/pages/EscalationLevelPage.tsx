@@ -19,12 +19,12 @@
 import * as React from "react"
 import { Hero } from "../components/Hero"
 import useSWR from "swr"
-import { baseURL, fetcher, IUser } from "../utils"
-import { SelectUser } from "../SelectUser"
+import { baseURL, BasicUser, fetcher } from "../utils"
+import { SelectUser } from "../components/SelectUser"
 import { GameVersionTabs } from "../components/GameVersionTabs"
 import { EscalationLevelPicker } from "../EscalationLevelPicker"
 
-export interface CodenameMeta {
+export type CodenameMeta = {
     [location: string]: {
         readonly codename: string
         readonly name: string
@@ -60,7 +60,7 @@ export function EscalationLevelPage() {
     const isReadyToSelectUser = Boolean(
         user === undefined &&
             userData &&
-            (userData as { error: string } & IUser[])?.error !== "bad gv",
+            (userData as { error: string } & BasicUser[])?.error !== "bad gv",
     )
 
     function getStatus(): string {
@@ -93,7 +93,10 @@ export function EscalationLevelPage() {
                     />
                 )}
                 {isReadyToSelectUser && (
-                    <SelectUser users={userData as IUser[]} setUser={setUser} />
+                    <SelectUser
+                        users={userData as BasicUser[]}
+                        setUser={setUser}
+                    />
                 )}
                 {Boolean(codenameData) &&
                     gameVersion !== 0 &&

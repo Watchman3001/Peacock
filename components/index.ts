@@ -16,15 +16,6 @@
  *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// load as soon as possible to prevent dependency issues
-import "./generatedPeacockRequireTable"
-
-// load flags as soon as possible
-import { getFlag, loadFlags } from "./flags"
-
-loadFlags()
-
-import { program } from "commander"
 import express, { Request, Router } from "express"
 import http from "http"
 import {
@@ -33,7 +24,6 @@ import {
     handleAxiosError,
     IS_LAUNCHER,
     jokes,
-    PEACOCKVER,
     PEACOCKVERSTRING,
     ServerVer,
 } from "./utils"
@@ -49,8 +39,7 @@ import type {
     S2CEventWithTimestamp,
     ServerConnectionConfig,
 } from "./types/types"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
-import { join } from "path"
+import { readFileSync } from "fs"
 import {
     errorLoggingMiddleware,
     log,
@@ -73,7 +62,7 @@ import {
 import { legacyProfileRouter } from "./2016/legacyProfileRouter"
 import { legacyMenuDataRouter } from "./2016/legacyMenuData"
 import { legacyContractRouter } from "./2016/legacyContractHandler"
-import { initRp } from "./discordRp"
+import { initRp } from "./discord/discordRp"
 import random from "random"
 import { generateUserCentric } from "./contracts/dataGen"
 import { json as jsonMiddleware, urlencoded } from "body-parser"
@@ -82,15 +71,12 @@ import { setupHotListener } from "./hotReloadService"
 import type { AxiosError } from "axios"
 import serveStatic from "serve-static"
 import { webFeaturesRouter } from "./webFeatures"
-import { toolsMenu } from "./tools"
 import picocolors from "picocolors"
 import { multiplayerRouter } from "./multiplayer/multiplayerService"
 import { multiplayerMenuDataRouter } from "./multiplayer/multiplayerMenuData"
-import { pack, unpack } from "msgpackr"
 import { liveSplitManager } from "./livesplit/liveSplitManager"
-import { cheapLoadUserData } from "./databaseHandler"
-
-loadFlags()
+import { cheapLoadUserData, setupFileStructure } from "./databaseHandler"
+import { getFlag } from "./flags"
 
 const host = process.env.HOST || "0.0.0.0"
 const port = process.env.PORT || 80
@@ -114,6 +100,10 @@ function uncaught(error: Error): void {
         log(
             LogLevel.ERROR,
             `  - Your user account doesn't have permission (firewall can block it)`,
+        )
+        log(
+            LogLevel.INFO,
+            `Check this wiki page: https://thepeacockproject.org/wiki/troubleshooting/fix-port-in-use for steps on how to fix this!`,
         )
         process.exit(1)
     }
@@ -317,7 +307,7 @@ app.use(
                     break
                 case "fghi4567xQOCheZIin0pazB47qGUvZw4":
                 case STEAM_NAMESPACE_2021:
-                    req.serverVersion = "8-14"
+                    req.serverVersion = "8-15"
                     break
                 default:
                     res.status(400).json({ message: "no game data" })
@@ -508,7 +498,7 @@ app.use(
             }
 
             if (
-                ["6-74", "7-3", "7-17", "8-14"].includes(
+                ["6-74", "7-3", "7-17", "8-15"].includes(
                     <string>req.serverVersion,
                 )
             ) {
@@ -527,11 +517,10 @@ app.all("*", (req, res) => {
 
 app.use(errorLoggingMiddleware)
 
-program.description(
-    "The Peacock Project is a HITMAN™ World of Assassination Trilogy server replacement.",
-)
-
-function startServer(options: { hmr: boolean; pluginDevHost: boolean }): void {
+export async function startServer(options: {
+    hmr: boolean
+    pluginDevHost: boolean
+}): Promise<void> {
     void checkForUpdates()
 
     if (!IS_LAUNCHER) {
@@ -551,10 +540,9 @@ function startServer(options: { hmr: boolean; pluginDevHost: boolean }): void {
 
     log(
         LogLevel.INFO,
-        `This is Peacock v${PEACOCKVERSTRING} (rev ${PEACOCKVER}), with Node v${process.versions.node}.`,
+        `This is Peacock v${PEACOCKVERSTRING} with Node v${process.versions.node}.`,
     )
 
-    // jokes lol
     if (getFlag("jokes") === true) {
         log(
             LogLevel.INFO,
@@ -564,117 +552,40 @@ function startServer(options: { hmr: boolean; pluginDevHost: boolean }): void {
         )
     }
 
-    // make sure required folder structure is in place
-    for (const dir of [
-        "contractSessions",
-        "plugins",
-        "userdata",
-        "contracts",
-        join("userdata", "epicids"),
-        join("userdata", "steamids"),
-        join("userdata", "users"),
-        join("userdata", "h1", "steamids"),
-        join("userdata", "h1", "epicids"),
-        join("userdata", "h1", "users"),
-        join("userdata", "h2", "steamids"),
-        join("userdata", "h2", "users"),
-        join("userdata", "scpc", "users"),
-        join("userdata", "scpc", "steamids"),
-        join("images", "actors"),
-        join("images", "contracts"),
-        join("images", "contracts", "elusive"),
-        join("images", "contracts", "escalation"),
-        join("images", "contracts", "featured"),
-        join("images", "unlockables_override"),
-    ]) {
-        if (existsSync(dir)) {
-            continue
+    try {
+        // make sure required folder structure is in place
+        await setupFileStructure()
+
+        if (options.hmr) {
+            void setupHotListener("contracts", () => {
+                log(
+                    LogLevel.INFO,
+                    "Detected a change in contracts! Re-indexing...",
+                )
+                controller.index()
+            })
         }
 
-        log(LogLevel.DEBUG, `Creating missing directory ${dir}`)
-        mkdirSync(dir, { recursive: true })
+        // once contracts directory is present, we are clear to boot
+        await loadouts.init()
+        await controller.boot(options.pluginDevHost)
+
+        const httpServer = http.createServer(app)
+
+        // @ts-expect-error Non-matching method sig
+        httpServer.listen(port, host)
+        log(LogLevel.INFO, "Server started.")
+
+        if (getFlag("discordRp") === true) {
+            initRp()
+        }
+
+        // initialize livesplit
+        await liveSplitManager.init()
+
+        return
+    } catch (e) {
+        log(LogLevel.ERROR, "Critical error during bootstrap!")
+        log(LogLevel.ERROR, e)
     }
-
-    if (options.hmr) {
-        log(LogLevel.DEBUG, "Experimental HMR enabled.")
-
-        void setupHotListener("contracts", () => {
-            log(LogLevel.INFO, "Detected a change in contracts! Re-indexing...")
-            controller.index()
-        })
-    }
-
-    // once contracts directory is present, we are clear to boot
-    loadouts.init()
-    void controller.boot(options.pluginDevHost)
-
-    const httpServer = http.createServer(app)
-
-    // @ts-expect-error Non-matching method sig
-    httpServer.listen(port, host)
-    log(LogLevel.INFO, "Server started.")
-
-    if (getFlag("discordRp") === true) {
-        initRp()
-    }
-
-    // initialize livesplit
-    void liveSplitManager.init()
 }
-
-program.option(
-    "--hmr",
-    "enable experimental hot reloading of contracts",
-    getFlag("experimentalHMR") as boolean,
-)
-program.option(
-    "--plugin-dev-host",
-    "activate plugin development features - requires plugin dev workspace setup",
-    getFlag("developmentPluginDevHost") as boolean,
-)
-program.action(startServer)
-
-program
-    .command("tools")
-    .description("open the tools UI")
-    .action(() => {
-        void toolsMenu()
-    })
-
-// noinspection RequiredAttributes
-program
-    .command("pack")
-    .argument("<input>", "input file to pack")
-    .option("-o, --output <path>", "where to output the packed file to", "")
-    .description("packs an input file into a Challenge Resource Package")
-    .action((input, options: { output: string }) => {
-        const outputPath =
-            options.output || input.replace(/\.[^/\\.]+$/, ".crp")
-
-        writeFileSync(
-            outputPath,
-            pack(JSON.parse(readFileSync(input).toString())),
-        )
-
-        log(LogLevel.INFO, `Packed "${input}" to "${outputPath}" successfully.`)
-    })
-
-// noinspection RequiredAttributes
-program
-    .command("unpack")
-    .argument("<input>", "input file to unpack")
-    .option("-o, --output <path>", "where to output the unpacked file to", "")
-    .description("unpacks a Challenge Resource Package")
-    .action((input, options: { output: string }) => {
-        const outputPath =
-            options.output || input.replace(/\.[^/\\.]+$/, ".json")
-
-        writeFileSync(outputPath, JSON.stringify(unpack(readFileSync(input))))
-
-        log(
-            LogLevel.INFO,
-            `Unpacked "${input}" to "${outputPath}" successfully.`,
-        )
-    })
-
-program.parse(process.argv)

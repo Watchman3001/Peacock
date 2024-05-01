@@ -58,7 +58,11 @@ import {
     compileRuntimeChallenge,
     inclusionDataCheck,
 } from "./candle/challengeHelpers"
-import { LoadSaveBody, ResolveGamerTagsBody } from "./types/gameSchemas"
+import {
+    GetChallengeProgressionBody,
+    LoadSaveBody,
+    ResolveGamerTagsBody,
+} from "./types/gameSchemas"
 import assert from "assert"
 
 const profileRouter = Router()
@@ -285,7 +289,6 @@ export async function resolveProfiles(
                         Gamertag: null,
                         DevId: "IOI",
                         SteamId: null,
-                        StadiaId: null,
                         EpicId: null,
                         NintendoId: null,
                         XboxLiveId: null,
@@ -312,7 +315,6 @@ export async function resolveProfiles(
                             fakePlayer.platform === "steam"
                                 ? fakePlayer.platformId
                                 : null,
-                        StadiaId: null,
                         EpicId:
                             fakePlayer.platform === "epic"
                                 ? fakePlayer.platformId
@@ -580,6 +582,54 @@ profileRouter.post(
 )
 
 profileRouter.post(
+    "/ChallengesService/GetProgression",
+    jsonMiddleware(),
+    // @ts-expect-error Has jwt props.
+    (req: RequestWithJwt<never, GetChallengeProgressionBody>, res) => {
+        if (!Array.isArray(req.body.challengeids)) {
+            res.status(400).send("invalid body")
+            return
+        }
+
+        if (req.jwt.unique_name !== req.body.profileid) {
+            res.status(403).send("unauthorised")
+            return
+        }
+
+        const challenges: ChallengeProgressionData[] = []
+
+        for (const challengeId of req.body.challengeids) {
+            const challenge = controller.challengeService.getChallengeById(
+                challengeId,
+                req.gameVersion,
+            )
+
+            if (!challenge) {
+                log(LogLevel.ERROR, `Unknown challenge in CSGP: ${challengeId}`)
+                continue
+            }
+
+            const progression =
+                controller.challengeService.getPersistentChallengeProgression(
+                    req.jwt.unique_name,
+                    challengeId,
+                    req.gameVersion,
+                )
+
+            challenges.push({
+                ChallengeId: challengeId,
+                ProfileId: req.jwt.unique_name,
+                State: progression.State,
+                CompletedAt: progression.CompletedAt,
+                Completed: progression.Completed,
+            })
+        }
+
+        res.json(challenges)
+    },
+)
+
+profileRouter.post(
     "/HubPagesService/GetChallengeTreeFor",
     jsonMiddleware(),
     // @ts-expect-error Has jwt props.
@@ -731,13 +781,6 @@ profileRouter.post(
                 LogLevel.WARN,
                 "No such save detected! Might be an official servers save.",
             )
-
-            if (PEACOCK_DEV) {
-                log(
-                    LogLevel.DEBUG,
-                    `(Save-context: ${req.body.contractSessionId}; ${req.body.saveToken})`,
-                )
-            }
 
             log(
                 LogLevel.WARN,

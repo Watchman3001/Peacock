@@ -21,7 +21,7 @@ import {
     ContractHistory,
     GameVersion,
     HitsCategoryCategory,
-    IHit,
+    Hit,
 } from "../types/types"
 import {
     contractIdToHitObject,
@@ -242,9 +242,9 @@ export class HitsCategoryService {
                     for (const id of escalations) {
                         const contract = controller.resolveContract(id)
 
-                        if (!contract) {
-                            continue
-                        }
+                        if (!contract) continue
+
+                        if (contract.Metadata.Season === -1) continue
 
                         const isPeacock = contract.Metadata.Season === 0
                         const season = isPeacock
@@ -325,6 +325,17 @@ export class HitsCategoryService {
             if (hit.UserCentricContract.Data.PlaylistData) {
                 hit.UserCentricContract.Data.PlaylistData.IsAdded =
                     favorites.includes(hit.Id)
+            }
+
+            // Save the contract
+            if (
+                !controller.contracts.has(
+                    hit.UserCentricContract.Contract.Metadata.Id,
+                )
+            ) {
+                await controller.commitNewContract(
+                    hit.UserCentricContract.Contract,
+                )
             }
         }
 
@@ -525,7 +536,7 @@ export class HitsCategoryService {
 
         const hitObjectList = hits
             .map((id) => contractIdToHitObject(id, gameVersion, userId))
-            .filter(Boolean) as IHit[]
+            .filter(Boolean) as Hit[]
 
         if (!this.paginationExempt.includes(category)) {
             const paginated = paginate(hitObjectList, this.hitsPerPage)
